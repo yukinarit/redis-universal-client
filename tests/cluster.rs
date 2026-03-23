@@ -2,9 +2,9 @@ use redis::AsyncCommands;
 use redis_universal_client::{UniversalBuilder, UniversalClient};
 use std::sync::OnceLock;
 use testcontainers_modules::testcontainers::{
+    Container, GenericImage, ImageExt,
     core::{ContainerPort, WaitFor},
     runners::SyncRunner,
-    Container, GenericImage, ImageExt,
 };
 
 fn should_run() -> bool {

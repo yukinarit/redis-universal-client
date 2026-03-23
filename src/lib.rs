@@ -1,4 +1,4 @@
-use redis::{cluster::ClusterClient, Client, ErrorKind, RedisError, RedisResult};
+use redis::{Client, ErrorKind, RedisError, RedisResult, cluster::ClusterClient};
 
 /// A universal Redis client that works with both standalone Redis and Redis Cluster.
 ///
