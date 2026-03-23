@@ -1,0 +1,21 @@
+[package]
+edition = "2024"
+name = "redis-universal-client"
+version = "0.1.0"
+authors = ["yukinarit <yukinarit84@gmail.com>"]
+description = "Simple wrapper around Client and ClusterClient, like go-redis UniversalClient"
+homepage = "https://github.com/yukinarit/redis-universal-client"
+documentation = "https://docs.rs/redis-universal-client"
+readme = "README.md"
+keywords = ["redis", "database"]
+license = "BSD-3-Clause"
+repository = "https://github.com/yukinarit/redis-universal-client"
+resolver = "2"
+[dependencies.redis]
+version = "1"
+features = ["cluster", "cluster-async", "tokio-comp"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+testcontainers-modules = { version = "0.13", features = ["redis", "blocking"] }
