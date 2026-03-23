@@ -2,7 +2,7 @@ use redis::AsyncCommands;
 use redis_universal_client::{UniversalBuilder, UniversalClient};
 use testcontainers_modules::{
     redis::Redis,
-    testcontainers::{runners::AsyncRunner, ContainerAsync},
+    testcontainers::{ContainerAsync, runners::AsyncRunner},
 };
 
 async fn redis_url() -> (ContainerAsync<Redis>, String) {
