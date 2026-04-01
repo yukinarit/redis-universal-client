@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 #[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
 use redis::TlsMode;
 use redis::{

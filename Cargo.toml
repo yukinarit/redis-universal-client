@@ -1,7 +1,7 @@
 [package]
 edition = "2024"
 name = "redis-universal-client"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["yukinarit <yukinarit84@gmail.com>"]
 description = "Simple wrapper around Client and ClusterClient, like go-redis UniversalClient"
 homepage = "https://github.com/yukinarit/redis-universal-client"
@@ -13,9 +13,12 @@ repository = "https://github.com/yukinarit/redis-universal-client"
 resolver = "2"
 [features]
 default = []
-tls-native-tls = ["redis/tokio-native-tls-comp"]
-tls-rustls = ["redis/tokio-rustls-comp"]
+tls-native-tls = ["redis/tls-native-tls", "redis/tokio-native-tls-comp"]
+tls-rustls = ["redis/tls-rustls", "redis/tokio-rustls-comp"]
 tls-rustls-insecure = ["redis/tls-rustls-insecure", "tls-rustls"]
+tls-rustls-webpki-roots = ["redis/tls-rustls-webpki-roots", "tls-rustls"]
+tokio-native-tls-comp = ["redis/tokio-native-tls-comp", "tls-native-tls"]
+tokio-rustls-comp = ["redis/tokio-rustls-comp", "tls-rustls"]
 
 [dependencies.redis]
 version = "1"
