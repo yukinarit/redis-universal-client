@@ -1,3 +1,5 @@
+#[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
+use redis::TlsMode;
 use redis::{
     Client, ErrorKind, RedisConnectionInfo, RedisError, RedisResult, cluster::ClusterClient,
 };
@@ -105,6 +107,8 @@ pub struct UniversalBuilder<T> {
     cluster: bool,
     username: Option<String>,
     password: Option<String>,
+    #[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
+    tls: Option<TlsMode>,
 }
 
 impl<T> UniversalBuilder<T> {
@@ -114,6 +118,8 @@ impl<T> UniversalBuilder<T> {
             cluster: false,
             username: None,
             password: None,
+            #[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
+            tls: None,
         }
     }
 
@@ -134,6 +140,16 @@ impl<T> UniversalBuilder<T> {
         self
     }
 
+    /// Enable TLS. Use [`TlsMode::Secure`] to verify certificates (recommended)
+    /// or [`TlsMode::Insecure`] to skip verification.
+    ///
+    /// Requires the `tls-native-tls` or `tls-rustls` feature.
+    #[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
+    pub fn tls(mut self, mode: TlsMode) -> UniversalBuilder<T> {
+        self.tls = Some(mode);
+        self
+    }
+
     pub fn build(self) -> RedisResult<UniversalClient>
     where
         T: redis::IntoConnectionInfo + Clone,
@@ -143,6 +159,8 @@ impl<T> UniversalBuilder<T> {
             cluster,
             username,
             password,
+            #[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
+            tls,
         } = self;
 
         if addrs.is_empty() {
@@ -160,8 +178,21 @@ impl<T> UniversalBuilder<T> {
             if let Some(p) = password {
                 builder = builder.password(p);
             }
+            #[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
+            if let Some(mode) = tls {
+                builder = builder.tls(mode);
+            }
             builder.build().map(UniversalClient::Cluster)
-        } else if username.is_some() || password.is_some() {
+        } else if username.is_some() || password.is_some() || {
+            #[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
+            {
+                tls.is_some()
+            }
+            #[cfg(not(any(feature = "tls-native-tls", feature = "tls-rustls")))]
+            {
+                false
+            }
+        } {
             let conn_info = addrs.remove(0).into_connection_info()?;
             let orig = conn_info.redis_settings();
             let mut redis_info = RedisConnectionInfo::default()
@@ -174,11 +205,40 @@ impl<T> UniversalBuilder<T> {
                 redis_info = redis_info.set_password(p);
             }
             let conn_info = conn_info.set_redis_settings(redis_info);
+            #[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
+            let conn_info = if let Some(mode) = tls {
+                apply_tls_to_conn_info(conn_info, mode)?
+            } else {
+                conn_info
+            };
             Client::open(conn_info).map(UniversalClient::Client)
         } else {
             Client::open(addrs.remove(0)).map(UniversalClient::Client)
         }
     }
+}
+
+/// Converts a `ConnectionInfo` with a plain TCP address to TLS by replacing
+/// `ConnectionAddr::Tcp` with `ConnectionAddr::TcpTls`.
+///
+/// If the address is already TLS or is a Unix socket, it is left unchanged.
+#[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
+fn apply_tls_to_conn_info(
+    conn_info: redis::ConnectionInfo,
+    mode: TlsMode,
+) -> RedisResult<redis::ConnectionInfo> {
+    let insecure = mode == TlsMode::Insecure;
+    let new_addr = match conn_info.addr() {
+        redis::ConnectionAddr::Tcp(host, port) => redis::ConnectionAddr::TcpTls {
+            host: host.clone(),
+            port: *port,
+            insecure,
+            tls_params: None,
+        },
+        // Already TLS or Unix socket — leave as-is
+        other => other.clone(),
+    };
+    Ok(conn_info.set_addr(new_addr))
 }
 
 /// Async multiplexed connection for both standalone and cluster Redis.
@@ -308,6 +368,37 @@ mod tests {
             "redis://127.0.0.1:7001".to_string(),
         ])
         .password("secret")
+        .cluster(true)
+        .build();
+        assert!(result.unwrap().is_cluster());
+    }
+
+    #[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
+    #[test]
+    fn builder_tls_secure_is_client() {
+        let result = UniversalBuilder::new(vec!["redis://127.0.0.1:6380".to_string()])
+            .tls(redis::TlsMode::Secure)
+            .build();
+        assert!(result.unwrap().is_client());
+    }
+
+    #[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
+    #[test]
+    fn builder_tls_insecure_is_client() {
+        let result = UniversalBuilder::new(vec!["redis://127.0.0.1:6380".to_string()])
+            .tls(redis::TlsMode::Insecure)
+            .build();
+        assert!(result.unwrap().is_client());
+    }
+
+    #[cfg(any(feature = "tls-native-tls", feature = "tls-rustls"))]
+    #[test]
+    fn builder_tls_cluster_is_cluster() {
+        let result = UniversalBuilder::new(vec![
+            "redis://127.0.0.1:7000".to_string(),
+            "redis://127.0.0.1:7001".to_string(),
+        ])
+        .tls(redis::TlsMode::Secure)
         .cluster(true)
         .build();
         assert!(result.unwrap().is_cluster());
