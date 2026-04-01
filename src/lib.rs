@@ -1,4 +1,6 @@
-use redis::{Client, ErrorKind, RedisError, RedisResult, cluster::ClusterClient};
+use redis::{
+    Client, ErrorKind, RedisConnectionInfo, RedisError, RedisResult, cluster::ClusterClient,
+};
 
 /// A universal Redis client that works with both standalone Redis and Redis Cluster.
 ///
@@ -15,7 +17,7 @@ use redis::{Client, ErrorKind, RedisError, RedisResult, cluster::ClusterClient};
 /// // Standalone Redis
 /// let client = UniversalClient::open(vec!["redis://127.0.0.1:6379"])?;
 /// let mut conn = client.get_connection().await?;
-/// conn.set("key", "value").await?;
+/// conn.set::<_, _, ()>("key", "value").await?;
 /// let val: String = conn.get("key").await?;
 ///
 /// // Redis Cluster (multiple addresses)
@@ -73,10 +75,11 @@ impl UniversalClient {
     }
 }
 
-/// Builder for [`UniversalClient`] with explicit control over cluster mode.
+/// Builder for [`UniversalClient`] with explicit control over cluster mode and credentials.
 ///
 /// Unlike [`UniversalClient::open`], the builder lets you force cluster mode
-/// regardless of the number of addresses.
+/// regardless of the number of addresses, and set ACL username/password
+/// programmatically rather than embedding them in the URL.
 ///
 /// # Examples
 ///
@@ -88,12 +91,20 @@ impl UniversalClient {
 /// let client = UniversalBuilder::new(vec!["redis://127.0.0.1:7000".to_string()])
 ///     .cluster(true)
 ///     .build()?;
+///
+/// // Standalone Redis with ACL credentials
+/// let client = UniversalBuilder::new(vec!["redis://127.0.0.1:6379".to_string()])
+///     .username("alice")
+///     .password("secret")
+///     .build()?;
 /// # Ok(())
 /// # }
 /// ```
 pub struct UniversalBuilder<T> {
     addrs: Vec<T>,
     cluster: bool,
+    username: Option<String>,
+    password: Option<String>,
 }
 
 impl<T> UniversalBuilder<T> {
@@ -101,6 +112,8 @@ impl<T> UniversalBuilder<T> {
         UniversalBuilder {
             addrs,
             cluster: false,
+            username: None,
+            password: None,
         }
     }
 
@@ -109,11 +122,28 @@ impl<T> UniversalBuilder<T> {
         self
     }
 
+    /// Set the ACL username for authentication (Redis 6.0+).
+    pub fn username(mut self, username: impl Into<String>) -> UniversalBuilder<T> {
+        self.username = Some(username.into());
+        self
+    }
+
+    /// Set the password for authentication.
+    pub fn password(mut self, password: impl Into<String>) -> UniversalBuilder<T> {
+        self.password = Some(password.into());
+        self
+    }
+
     pub fn build(self) -> RedisResult<UniversalClient>
     where
         T: redis::IntoConnectionInfo + Clone,
     {
-        let UniversalBuilder { mut addrs, cluster } = self;
+        let UniversalBuilder {
+            mut addrs,
+            cluster,
+            username,
+            password,
+        } = self;
 
         if addrs.is_empty() {
             return Err(RedisError::from((
@@ -123,7 +153,28 @@ impl<T> UniversalBuilder<T> {
         }
 
         if cluster {
-            ClusterClient::new(addrs).map(UniversalClient::Cluster)
+            let mut builder = ClusterClient::builder(addrs);
+            if let Some(u) = username {
+                builder = builder.username(u);
+            }
+            if let Some(p) = password {
+                builder = builder.password(p);
+            }
+            builder.build().map(UniversalClient::Cluster)
+        } else if username.is_some() || password.is_some() {
+            let conn_info = addrs.remove(0).into_connection_info()?;
+            let orig = conn_info.redis_settings();
+            let mut redis_info = RedisConnectionInfo::default()
+                .set_db(orig.db())
+                .set_protocol(orig.protocol());
+            if let Some(u) = username {
+                redis_info = redis_info.set_username(u);
+            }
+            if let Some(p) = password {
+                redis_info = redis_info.set_password(p);
+            }
+            let conn_info = conn_info.set_redis_settings(redis_info);
+            Client::open(conn_info).map(UniversalClient::Client)
         } else {
             Client::open(addrs.remove(0)).map(UniversalClient::Client)
         }
@@ -231,5 +282,34 @@ mod tests {
         .cluster(false)
         .build();
         assert!(result.unwrap().is_client());
+    }
+
+    #[test]
+    fn builder_with_password_is_client() {
+        let result = UniversalBuilder::new(vec!["redis://127.0.0.1:6379".to_string()])
+            .password("secret")
+            .build();
+        assert!(result.unwrap().is_client());
+    }
+
+    #[test]
+    fn builder_with_username_and_password_is_client() {
+        let result = UniversalBuilder::new(vec!["redis://127.0.0.1:6379".to_string()])
+            .username("alice")
+            .password("secret")
+            .build();
+        assert!(result.unwrap().is_client());
+    }
+
+    #[test]
+    fn builder_with_password_cluster_is_cluster() {
+        let result = UniversalBuilder::new(vec![
+            "redis://127.0.0.1:7000".to_string(),
+            "redis://127.0.0.1:7001".to_string(),
+        ])
+        .password("secret")
+        .cluster(true)
+        .build();
+        assert!(result.unwrap().is_cluster());
     }
 }
